@@ -72,7 +72,7 @@ jobs:
           fi
 
           CURRENT="$START"
-          while [[ "$CURRENT" <= "$END" ]]; do
+          while [[ "$CURRENT" < "$END" || "$CURRENT" == "$END" ]]; do
             echo ""
             echo "=== $CURRENT ==="
             legalize daily -c es --repo-path .. --data-dir /tmp/data-es --date "$CURRENT" || true
