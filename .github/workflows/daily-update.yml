@@ -1,0 +1,83 @@
+name: Daily update
+
+on:
+  schedule:
+    # Mon-Sat at 11:00 UTC (BOE is typically published by 09:00 Madrid time)
+    - cron: "0 11 * * 1-6"
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: "Start date (YYYY-MM-DD) — empty = auto-detect from last commit"
+        required: false
+        type: string
+      to_date:
+        description: "End date (YYYY-MM-DD) — empty = today"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: legalize-dev/legalize-pipeline
+          path: pipeline
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install pipeline
+        working-directory: pipeline
+        run: pip install -e .
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "Legalize"
+          git config --global user.email "legalize@legalize.dev"
+
+      - name: Run catch-up updates
+        working-directory: pipeline
+        env:
+          INPUT_FROM: ${{ inputs.from_date }}
+          INPUT_TO: ${{ inputs.to_date }}
+        run: |
+          # Detect start date
+          if [ -n "$INPUT_FROM" ]; then
+            START="$INPUT_FROM"
+          else
+            LAST=$(git -C .. log --format="%ad" --date=short -- 'es/**' 'es-*/**' | head -1)
+            if [ -z "$LAST" ]; then
+              echo "No previous law commits found; cannot auto-detect start date."
+              exit 1
+            fi
+            START=$(date -d "$LAST + 1 day" +%Y-%m-%d)
+          fi
+
+          END="${INPUT_TO:-$(date +%Y-%m-%d)}"
+
+          echo "Date range: $START → $END"
+
+          if [[ "$START" > "$END" ]]; then
+            echo "Already up to date."
+            exit 0
+          fi
+
+          CURRENT="$START"
+          while [[ "$CURRENT" <= "$END" ]]; do
+            echo ""
+            echo "=== $CURRENT ==="
+            legalize daily -c es --repo-path .. --data-dir /tmp/data-es --date "$CURRENT" || true
+            CURRENT=$(date -d "$CURRENT + 1 day" +%Y-%m-%d)
+          done
+
+      - name: Push commits
+        run: git push origin HEAD
